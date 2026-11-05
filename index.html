@@ -233,7 +233,9 @@ var rng = mulberry32(parseInt(QS.get('seed')||'7',10)|0);
 var TICK_MS = 1000;        // one command per second
 var TRACK = 9;             // tiles 0..8
 var POWER_MAX = 6;
-var TICK_CAP = 150;        // stalemate guard, per foe
+var TICK_CAP = 90;         // hard stalemate guard, per foe
+var QUIET_CAP = 14;        // end early when nobody's HP changes for this many ticks
+var QUIET_CAP_TUT = 7;     // lesson 2 only needs ~3 blocked hits to make its point
 
 var CMD = {
   MOVE:  {cost:0, blurb:'step 1 tile toward the foe'},
@@ -442,7 +444,7 @@ function startBattle(foe){
   S.foe = foe; S.foeHp = foe.hp; S.foePw = 0;
   S.pos = (foe.pstart!=null? foe.pstart : 1); S.foePos = TRACK-2; S.pc = 0; S.foePc = 0;
   S.pw = 0; S.pendingCharge = 0; S.foeCharge = 0;
-  S.battleTicks = 0; S.battles++;
+  S.battleTicks = 0; S.quietTicks = 0; S.battles++;
   S.log = []; pushLog('— FIGHT —');
   anim.pX = tileX(S.pos); anim.eX = tileX(S.foePos);
   setPhase('battle');
@@ -513,6 +515,11 @@ function tick(){
   }
   if(eOk && ec==='FIX'){ S.foeHp = Math.min(S.foe.hp, S.foeHp + S.foe.atk); }
 
+  var hpNow = S.hp + '/' + S.foeHp;
+  /* only count stalemate while both are in range: chasing a kiter is not a stalemate */
+  S.quietTicks = (hpNow !== S.lastHpSig) ? 0 : (S.foePos - S.pos <= 2 ? (S.quietTicks||0) + 1 : (S.quietTicks||0));
+  S.lastHpSig = hpNow;
+
   /* 7. advance program counters */
   S.pc = (S.pc+1) % pprog.length;
   S.foePc = (S.foePc+1) % eprog.length;
@@ -522,7 +529,7 @@ function tick(){
 
   if(S.foeHp<=0) return endBattle('win');
   if(S.hp<=0)    return endBattle('lose');
-  if(S.battleTicks>=(S.tutActive?26:TICK_CAP)) return endBattle('timeout');
+  if(S.battleTicks>=(S.tutActive?26:TICK_CAP) || S.quietTicks>=(S.tutActive?QUIET_CAP_TUT:QUIET_CAP)) return endBattle('timeout');
 }
 
 var tickTimer = null;
@@ -903,6 +910,19 @@ tutStart();
 refreshHud();
 
 /* hooks for the automated playtest */
+// muc kiem "moc lot man" dung chung - tools/framecheck.js, tools/CAMERA-3D.md
+window.__frame = function(){
+  var w = view.clientWidth||1, h = view.clientHeight||1, v = new THREE.Vector3();
+  function S3(x, y, z){ v.set(x, y===undefined?0.6:y, z===undefined?0:z).project(camera);
+    return {x:(v.x*0.5+0.5)*w, y:(-v.y*0.5+0.5)*h}; }
+  var half = (TRACK*TILE)/2;
+  // bo cuc panel: canvas chi chiem mot phan man hinh (dang cho chi chon ui-option)
+  return { w:w, h:h, panel:true, span:['left','right'], marks:{
+    left:  S3(-half, 0.6), right: S3(half, 0.6),
+    floorL:S3(-half, 0),   floorR:S3(half, 0),
+    headL: S3(-half, 2.6), headR: S3(half, 2.6)
+  }};
+};
 window.__g = {
   S:S, CMD:CMD, LADDER:LADDER, TUT:TUT,
   info:function(){ return {phase:S.phase, tut:S.tut, tutActive:!!S.tutActive,
